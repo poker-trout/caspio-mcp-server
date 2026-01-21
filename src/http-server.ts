@@ -56,7 +56,16 @@ interface JsonRpcResponse {
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
-const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
+
+// BASE_URL must be set for production deployments
+// Railway provides RAILWAY_PUBLIC_DOMAIN automatically
+const RAILWAY_URL = process.env.RAILWAY_PUBLIC_DOMAIN
+  ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+  : null;
+const BASE_URL = process.env.BASE_URL || RAILWAY_URL || `http://localhost:${PORT}`;
+
+// Log configuration on startup
+console.log(`[Config] PORT=${PORT}, BASE_URL=${BASE_URL}`);
 
 // In-memory storage (use Redis/DB in production)
 const sessions = new Map<string, OAuthSession>();
