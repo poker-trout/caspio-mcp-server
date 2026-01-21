@@ -440,7 +440,45 @@ function getSessionFromRequest(req: http.IncomingMessage): OAuthSession | null {
 }
 
 async function handleMcpRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-  // Check authorization
+  const body = await readBody(req);
+  let rpcRequest: JsonRpcRequest;
+  try {
+    rpcRequest = JSON.parse(body);
+  } catch {
+    sendJson(res, 400, {
+      jsonrpc: '2.0',
+      id: null,
+      error: { code: -32700, message: 'Parse error' },
+    });
+    return;
+  }
+
+  // Allow initialize and tools/list without authentication
+  // This enables MCP clients to discover available tools before auth
+  const unauthenticatedMethods = ['initialize', 'tools/list', 'notifications/initialized'];
+
+  if (unauthenticatedMethods.includes(rpcRequest.method)) {
+    try {
+      const result = await handleMcpMethodUnauthenticated(rpcRequest);
+      sendJson(res, 200, {
+        jsonrpc: '2.0',
+        id: rpcRequest.id,
+        result,
+      });
+    } catch (error) {
+      sendJson(res, 200, {
+        jsonrpc: '2.0',
+        id: rpcRequest.id,
+        error: {
+          code: -32603,
+          message: error instanceof Error ? error.message : 'Internal error',
+        },
+      });
+    }
+    return;
+  }
+
+  // All other methods require authentication
   const session = getSessionFromRequest(req);
   if (!session) {
     res.writeHead(401, {
@@ -458,21 +496,8 @@ async function handleMcpRequest(req: http.IncomingMessage, res: http.ServerRespo
     clientSecret: session.caspioClientSecret,
   });
 
-  const body = await readBody(req);
-  let rpcRequest: JsonRpcRequest;
   try {
-    rpcRequest = JSON.parse(body);
-  } catch {
-    sendJson(res, 400, {
-      jsonrpc: '2.0',
-      id: null,
-      error: { code: -32700, message: 'Parse error' },
-    });
-    return;
-  }
-
-  try {
-    const result = await handleMcpMethod(rpcRequest, caspioClient);
+    const result = await handleMcpMethodAuthenticated(rpcRequest, caspioClient);
     sendJson(res, 200, {
       jsonrpc: '2.0',
       id: rpcRequest.id,
@@ -490,8 +515,9 @@ async function handleMcpRequest(req: http.IncomingMessage, res: http.ServerRespo
   }
 }
 
-async function handleMcpMethod(request: JsonRpcRequest, client: CaspioClient): Promise<any> {
-  const { method, params = {} } = request;
+// Handle methods that don't require authentication
+async function handleMcpMethodUnauthenticated(request: JsonRpcRequest): Promise<any> {
+  const { method } = request;
 
   switch (method) {
     case 'initialize':
@@ -507,22 +533,49 @@ async function handleMcpMethod(request: JsonRpcRequest, client: CaspioClient): P
         },
       };
 
+    case 'notifications/initialized':
+      return {};
+
     case 'tools/list':
       return {
         tools: [
           { name: 'caspio_list_tables', description: 'List all tables in the Caspio account', inputSchema: { type: 'object', properties: {}, required: [] } },
-          { name: 'caspio_get_table_schema', description: 'Get the schema of a table', inputSchema: { type: 'object', properties: { tableName: { type: 'string' } }, required: ['tableName'] } },
-          { name: 'caspio_get_records', description: 'Get records from a table', inputSchema: { type: 'object', properties: { tableName: { type: 'string' }, where: { type: 'string' }, orderBy: { type: 'string' }, limit: { type: 'number' } }, required: ['tableName'] } },
-          { name: 'caspio_create_record', description: 'Create a record in a table', inputSchema: { type: 'object', properties: { tableName: { type: 'string' }, record: { type: 'object' } }, required: ['tableName', 'record'] } },
+          { name: 'caspio_get_table_schema', description: 'Get the schema/definition of a specific table including all field definitions', inputSchema: { type: 'object', properties: { tableName: { type: 'string' } }, required: ['tableName'] } },
+          { name: 'caspio_create_table', description: 'Create a new table in Caspio', inputSchema: { type: 'object', properties: { name: { type: 'string' }, columns: { type: 'array' }, note: { type: 'string' } }, required: ['name', 'columns'] } },
+          { name: 'caspio_delete_table', description: 'Delete a table from Caspio (USE WITH CAUTION)', inputSchema: { type: 'object', properties: { tableName: { type: 'string' }, confirm: { type: 'boolean' } }, required: ['tableName', 'confirm'] } },
+          { name: 'caspio_add_field', description: 'Add a new field/column to an existing table', inputSchema: { type: 'object', properties: { tableName: { type: 'string' }, field: { type: 'object' } }, required: ['tableName', 'field'] } },
+          { name: 'caspio_delete_field', description: 'Delete a field/column from a table (USE WITH CAUTION)', inputSchema: { type: 'object', properties: { tableName: { type: 'string' }, fieldName: { type: 'string' }, confirm: { type: 'boolean' } }, required: ['tableName', 'fieldName', 'confirm'] } },
+          { name: 'caspio_get_records', description: 'Get records from a table with optional filtering, sorting, and pagination', inputSchema: { type: 'object', properties: { tableName: { type: 'string' }, where: { type: 'string' }, orderBy: { type: 'string' }, limit: { type: 'number' }, pageNumber: { type: 'number' }, pageSize: { type: 'number' }, select: { type: 'string' }, groupBy: { type: 'string' } }, required: ['tableName'] } },
+          { name: 'caspio_create_record', description: 'Create a new record in a table', inputSchema: { type: 'object', properties: { tableName: { type: 'string' }, record: { type: 'object' } }, required: ['tableName', 'record'] } },
+          { name: 'caspio_create_records', description: 'Create multiple records in a table at once', inputSchema: { type: 'object', properties: { tableName: { type: 'string' }, records: { type: 'array' } }, required: ['tableName', 'records'] } },
           { name: 'caspio_update_records', description: 'Update records matching a WHERE clause', inputSchema: { type: 'object', properties: { tableName: { type: 'string' }, updates: { type: 'object' }, where: { type: 'string' } }, required: ['tableName', 'updates', 'where'] } },
-          { name: 'caspio_delete_records', description: 'Delete records (requires confirm=true)', inputSchema: { type: 'object', properties: { tableName: { type: 'string' }, where: { type: 'string' }, confirm: { type: 'boolean' } }, required: ['tableName', 'where', 'confirm'] } },
-          { name: 'caspio_list_views', description: 'List all views', inputSchema: { type: 'object', properties: {}, required: [] } },
-          { name: 'caspio_get_view_records', description: 'Get records from a view', inputSchema: { type: 'object', properties: { viewName: { type: 'string' }, where: { type: 'string' }, limit: { type: 'number' } }, required: ['viewName'] } },
-          { name: 'caspio_test_connection', description: 'Test the Caspio connection', inputSchema: { type: 'object', properties: {}, required: [] } },
-          { name: 'caspio_get_account_summary', description: 'Get account summary', inputSchema: { type: 'object', properties: {}, required: [] } },
+          { name: 'caspio_delete_records', description: 'Delete records matching a WHERE clause (USE WITH CAUTION)', inputSchema: { type: 'object', properties: { tableName: { type: 'string' }, where: { type: 'string' }, confirm: { type: 'boolean' } }, required: ['tableName', 'where', 'confirm'] } },
+          { name: 'caspio_list_views', description: 'List all views in the Caspio account', inputSchema: { type: 'object', properties: {}, required: [] } },
+          { name: 'caspio_get_view_schema', description: 'Get the schema/definition of a specific view', inputSchema: { type: 'object', properties: { viewName: { type: 'string' } }, required: ['viewName'] } },
+          { name: 'caspio_get_view_records', description: 'Get records from a view with optional filtering and sorting', inputSchema: { type: 'object', properties: { viewName: { type: 'string' }, where: { type: 'string' }, orderBy: { type: 'string' }, limit: { type: 'number' }, pageNumber: { type: 'number' }, pageSize: { type: 'number' }, select: { type: 'string' } }, required: ['viewName'] } },
+          { name: 'caspio_list_applications', description: 'List all applications in the Caspio account', inputSchema: { type: 'object', properties: {}, required: [] } },
+          { name: 'caspio_get_application', description: 'Get details of a specific application', inputSchema: { type: 'object', properties: { appName: { type: 'string' } }, required: ['appName'] } },
+          { name: 'caspio_list_files', description: 'List files in a folder', inputSchema: { type: 'object', properties: { folderPath: { type: 'string' } }, required: [] } },
+          { name: 'caspio_get_file_metadata', description: 'Get metadata for a specific file', inputSchema: { type: 'object', properties: { filePath: { type: 'string' } }, required: ['filePath'] } },
+          { name: 'caspio_delete_file', description: 'Delete a file (USE WITH CAUTION)', inputSchema: { type: 'object', properties: { filePath: { type: 'string' }, confirm: { type: 'boolean' } }, required: ['filePath', 'confirm'] } },
+          { name: 'caspio_list_tasks', description: 'List all scheduled tasks', inputSchema: { type: 'object', properties: {}, required: [] } },
+          { name: 'caspio_get_task', description: 'Get details of a specific scheduled task', inputSchema: { type: 'object', properties: { taskName: { type: 'string' } }, required: ['taskName'] } },
+          { name: 'caspio_run_task', description: 'Manually run a scheduled task', inputSchema: { type: 'object', properties: { taskName: { type: 'string' } }, required: ['taskName'] } },
+          { name: 'caspio_test_connection', description: 'Test the connection to Caspio API', inputSchema: { type: 'object', properties: {}, required: [] } },
+          { name: 'caspio_get_account_summary', description: 'Get a summary of the Caspio account including tables, views, and applications', inputSchema: { type: 'object', properties: {}, required: [] } },
         ],
       };
 
+    default:
+      throw new Error(`Method ${method} requires authentication`);
+  }
+}
+
+// Handle methods that require authentication
+async function handleMcpMethodAuthenticated(request: JsonRpcRequest, client: CaspioClient): Promise<any> {
+  const { method, params = {} } = request;
+
+  switch (method) {
     case 'tools/call':
       return await executeTool(params.name, params.arguments || {}, client);
 
@@ -564,22 +617,55 @@ async function executeTool(name: string, args: Record<string, any>, client: Casp
   let result: any;
 
   switch (name) {
+    // Tables
     case 'caspio_list_tables':
       result = { tables: await client.listTables() };
       break;
     case 'caspio_get_table_schema':
       result = await client.getTableDefinition(args.tableName);
       break;
+    case 'caspio_create_table':
+      await client.createTable({
+        Name: args.name,
+        Note: args.note,
+        Columns: args.columns,
+      });
+      result = { success: true, message: `Table '${args.name}' created successfully` };
+      break;
+    case 'caspio_delete_table':
+      if (!args.confirm) throw new Error('Deletion not confirmed. Set confirm=true to proceed.');
+      await client.deleteTable(args.tableName);
+      result = { success: true, message: `Table '${args.tableName}' deleted` };
+      break;
+    case 'caspio_add_field':
+      await client.addField(args.tableName, args.field);
+      result = { success: true, message: `Field added to '${args.tableName}'` };
+      break;
+    case 'caspio_delete_field':
+      if (!args.confirm) throw new Error('Deletion not confirmed. Set confirm=true to proceed.');
+      await client.deleteField(args.tableName, args.fieldName);
+      result = { success: true, message: `Field '${args.fieldName}' deleted from '${args.tableName}'` };
+      break;
+
+    // Records
     case 'caspio_get_records':
       const records = await client.getRecords(args.tableName, {
         where: args.where,
         orderBy: args.orderBy,
         limit: args.limit,
+        pageNumber: args.pageNumber,
+        pageSize: args.pageSize,
+        select: args.select,
+        groupBy: args.groupBy,
       });
       result = { records, count: records.length };
       break;
     case 'caspio_create_record':
       result = { success: true, record: await client.createRecord(args.tableName, args.record) };
+      break;
+    case 'caspio_create_records':
+      const createdRecords = await client.createRecords(args.tableName, args.records);
+      result = { success: true, records: createdRecords, count: createdRecords.length };
       break;
     case 'caspio_update_records':
       result = { success: true, recordsAffected: await client.updateRecords(args.tableName, args.updates, args.where) };
@@ -588,22 +674,67 @@ async function executeTool(name: string, args: Record<string, any>, client: Casp
       if (!args.confirm) throw new Error('Deletion not confirmed. Set confirm=true to proceed.');
       result = { success: true, recordsDeleted: await client.deleteRecords(args.tableName, args.where) };
       break;
+
+    // Views
     case 'caspio_list_views':
       result = { views: await client.listViews() };
+      break;
+    case 'caspio_get_view_schema':
+      result = await client.getViewDefinition(args.viewName);
       break;
     case 'caspio_get_view_records':
       const viewRecords = await client.getViewRecords(args.viewName, {
         where: args.where,
+        orderBy: args.orderBy,
         limit: args.limit,
+        pageNumber: args.pageNumber,
+        pageSize: args.pageSize,
+        select: args.select,
       });
       result = { records: viewRecords, count: viewRecords.length };
       break;
+
+    // Applications
+    case 'caspio_list_applications':
+      result = { applications: await client.listApplications() };
+      break;
+    case 'caspio_get_application':
+      result = await client.getApplication(args.appName);
+      break;
+
+    // Files
+    case 'caspio_list_files':
+      result = { files: await client.listFiles(args.folderPath || '/') };
+      break;
+    case 'caspio_get_file_metadata':
+      result = await client.getFileMetadata(args.filePath);
+      break;
+    case 'caspio_delete_file':
+      if (!args.confirm) throw new Error('Deletion not confirmed. Set confirm=true to proceed.');
+      await client.deleteFile(args.filePath);
+      result = { success: true, message: `File '${args.filePath}' deleted` };
+      break;
+
+    // Tasks
+    case 'caspio_list_tasks':
+      result = { tasks: await client.listTasks() };
+      break;
+    case 'caspio_get_task':
+      result = await client.getTask(args.taskName);
+      break;
+    case 'caspio_run_task':
+      await client.runTask(args.taskName);
+      result = { success: true, message: `Task '${args.taskName}' has been triggered` };
+      break;
+
+    // Utility
     case 'caspio_test_connection':
       result = { connected: await client.testConnection(), message: 'Connection successful' };
       break;
     case 'caspio_get_account_summary':
       result = await client.getAccountSummary();
       break;
+
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
