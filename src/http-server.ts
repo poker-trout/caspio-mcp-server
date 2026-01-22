@@ -515,6 +515,367 @@ async function handleMcpRequest(req: http.IncomingMessage, res: http.ServerRespo
   }
 }
 
+// Tool definitions with proper JSON Schema (compatible with ChatGPT, Gemini, Claude, etc.)
+function getToolDefinitions() {
+  // Reusable schema definitions
+  const columnSchema = {
+    type: 'object',
+    properties: {
+      Name: { type: 'string', description: 'Column name' },
+      Type: { type: 'string', description: 'Data type (e.g., STRING, NUMBER, BOOLEAN, DATE/TIME, etc.)' },
+      Unique: { type: 'boolean', description: 'Whether values must be unique' },
+      Description: { type: 'string', description: 'Column description' },
+      Length: { type: 'integer', description: 'Maximum length for string fields' },
+    },
+    required: ['Name', 'Type'],
+    additionalProperties: true,
+  };
+
+  const fieldSchema = {
+    type: 'object',
+    properties: {
+      Name: { type: 'string', description: 'Field name' },
+      Type: { type: 'string', description: 'Data type (e.g., STRING, NUMBER, BOOLEAN, DATE/TIME, etc.)' },
+      Unique: { type: 'boolean', description: 'Whether values must be unique' },
+      Description: { type: 'string', description: 'Field description' },
+      Length: { type: 'integer', description: 'Maximum length for string fields' },
+    },
+    required: ['Name', 'Type'],
+    additionalProperties: true,
+  };
+
+  const recordSchema = {
+    type: 'object',
+    description: 'Key-value pairs where keys are field names and values are field values',
+    additionalProperties: true,
+  };
+
+  return [
+    // Tables
+    {
+      name: 'caspio_list_tables',
+      description: 'List all tables in the Caspio account',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'caspio_get_table_schema',
+      description: 'Get the schema/definition of a specific table including all field definitions',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          tableName: { type: 'string', description: 'Name of the table' },
+        },
+        required: ['tableName'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'caspio_create_table',
+      description: 'Create a new table in Caspio',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Name for the new table' },
+          columns: {
+            type: 'array',
+            description: 'Array of column definitions',
+            items: columnSchema,
+            minItems: 1,
+          },
+          note: { type: 'string', description: 'Optional description/note for the table' },
+        },
+        required: ['name', 'columns'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'caspio_delete_table',
+      description: 'Delete a table from Caspio (USE WITH CAUTION - this action is irreversible)',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          tableName: { type: 'string', description: 'Name of the table to delete' },
+          confirm: { type: 'boolean', description: 'Must be true to confirm deletion' },
+        },
+        required: ['tableName', 'confirm'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'caspio_add_field',
+      description: 'Add a new field/column to an existing table',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          tableName: { type: 'string', description: 'Name of the table' },
+          field: fieldSchema,
+        },
+        required: ['tableName', 'field'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'caspio_delete_field',
+      description: 'Delete a field/column from a table (USE WITH CAUTION - this action is irreversible)',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          tableName: { type: 'string', description: 'Name of the table' },
+          fieldName: { type: 'string', description: 'Name of the field to delete' },
+          confirm: { type: 'boolean', description: 'Must be true to confirm deletion' },
+        },
+        required: ['tableName', 'fieldName', 'confirm'],
+        additionalProperties: false,
+      },
+    },
+
+    // Records
+    {
+      name: 'caspio_get_records',
+      description: 'Get records from a table with optional filtering, sorting, and pagination',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          tableName: { type: 'string', description: 'Name of the table' },
+          select: { type: 'string', description: 'Comma-separated list of fields to return' },
+          where: { type: 'string', description: 'Filter condition (e.g., "Status=\'Active\' AND Age>21")' },
+          orderBy: { type: 'string', description: 'Sort order (e.g., "LastName ASC, FirstName DESC")' },
+          groupBy: { type: 'string', description: 'Group by fields' },
+          limit: { type: 'integer', description: 'Maximum number of records to return' },
+          pageNumber: { type: 'integer', description: 'Page number for pagination (1-based)' },
+          pageSize: { type: 'integer', description: 'Number of records per page' },
+        },
+        required: ['tableName'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'caspio_create_record',
+      description: 'Create a new record in a table',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          tableName: { type: 'string', description: 'Name of the table' },
+          record: recordSchema,
+        },
+        required: ['tableName', 'record'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'caspio_create_records',
+      description: 'Create multiple records in a table at once (batch insert)',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          tableName: { type: 'string', description: 'Name of the table' },
+          records: {
+            type: 'array',
+            description: 'Array of records to create',
+            items: recordSchema,
+            minItems: 1,
+          },
+        },
+        required: ['tableName', 'records'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'caspio_update_records',
+      description: 'Update records matching a WHERE clause',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          tableName: { type: 'string', description: 'Name of the table' },
+          updates: {
+            type: 'object',
+            description: 'Key-value pairs of fields to update',
+            additionalProperties: true,
+          },
+          where: { type: 'string', description: 'Filter condition to match records (e.g., "ID=123")' },
+        },
+        required: ['tableName', 'updates', 'where'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'caspio_delete_records',
+      description: 'Delete records matching a WHERE clause (USE WITH CAUTION - this action is irreversible)',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          tableName: { type: 'string', description: 'Name of the table' },
+          where: { type: 'string', description: 'Filter condition to match records (e.g., "Status=\'Inactive\'")' },
+          confirm: { type: 'boolean', description: 'Must be true to confirm deletion' },
+        },
+        required: ['tableName', 'where', 'confirm'],
+        additionalProperties: false,
+      },
+    },
+
+    // Views
+    {
+      name: 'caspio_list_views',
+      description: 'List all views in the Caspio account',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'caspio_get_view_schema',
+      description: 'Get the schema/definition of a specific view',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          viewName: { type: 'string', description: 'Name of the view' },
+        },
+        required: ['viewName'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'caspio_get_view_records',
+      description: 'Get records from a view with optional filtering and sorting',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          viewName: { type: 'string', description: 'Name of the view' },
+          select: { type: 'string', description: 'Comma-separated list of fields to return' },
+          where: { type: 'string', description: 'Filter condition' },
+          orderBy: { type: 'string', description: 'Sort order' },
+          limit: { type: 'integer', description: 'Maximum number of records to return' },
+          pageNumber: { type: 'integer', description: 'Page number for pagination (1-based)' },
+          pageSize: { type: 'integer', description: 'Number of records per page' },
+        },
+        required: ['viewName'],
+        additionalProperties: false,
+      },
+    },
+
+    // Applications
+    {
+      name: 'caspio_list_applications',
+      description: 'List all applications in the Caspio account',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'caspio_get_application',
+      description: 'Get details of a specific application',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          appName: { type: 'string', description: 'Name of the application' },
+        },
+        required: ['appName'],
+        additionalProperties: false,
+      },
+    },
+
+    // Files
+    {
+      name: 'caspio_list_files',
+      description: 'List files in a folder',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          folderPath: { type: 'string', description: 'Path to the folder (default: root folder "/")' },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'caspio_get_file_metadata',
+      description: 'Get metadata for a specific file',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          filePath: { type: 'string', description: 'Path to the file' },
+        },
+        required: ['filePath'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'caspio_delete_file',
+      description: 'Delete a file (USE WITH CAUTION - this action is irreversible)',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          filePath: { type: 'string', description: 'Path to the file' },
+          confirm: { type: 'boolean', description: 'Must be true to confirm deletion' },
+        },
+        required: ['filePath', 'confirm'],
+        additionalProperties: false,
+      },
+    },
+
+    // Tasks
+    {
+      name: 'caspio_list_tasks',
+      description: 'List all scheduled tasks',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'caspio_get_task',
+      description: 'Get details of a specific scheduled task',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          taskName: { type: 'string', description: 'Name of the task' },
+        },
+        required: ['taskName'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'caspio_run_task',
+      description: 'Manually run a scheduled task',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          taskName: { type: 'string', description: 'Name of the task to run' },
+        },
+        required: ['taskName'],
+        additionalProperties: false,
+      },
+    },
+
+    // Utility
+    {
+      name: 'caspio_test_connection',
+      description: 'Test the connection to Caspio API',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'caspio_get_account_summary',
+      description: 'Get a summary of the Caspio account including tables, views, and applications',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+    },
+  ];
+}
+
 // Handle methods that don't require authentication
 async function handleMcpMethodUnauthenticated(request: JsonRpcRequest): Promise<any> {
   const { method } = request;
@@ -538,32 +899,7 @@ async function handleMcpMethodUnauthenticated(request: JsonRpcRequest): Promise<
 
     case 'tools/list':
       return {
-        tools: [
-          { name: 'caspio_list_tables', description: 'List all tables in the Caspio account', inputSchema: { type: 'object', properties: {}, required: [] } },
-          { name: 'caspio_get_table_schema', description: 'Get the schema/definition of a specific table including all field definitions', inputSchema: { type: 'object', properties: { tableName: { type: 'string' } }, required: ['tableName'] } },
-          { name: 'caspio_create_table', description: 'Create a new table in Caspio', inputSchema: { type: 'object', properties: { name: { type: 'string' }, columns: { type: 'array' }, note: { type: 'string' } }, required: ['name', 'columns'] } },
-          { name: 'caspio_delete_table', description: 'Delete a table from Caspio (USE WITH CAUTION)', inputSchema: { type: 'object', properties: { tableName: { type: 'string' }, confirm: { type: 'boolean' } }, required: ['tableName', 'confirm'] } },
-          { name: 'caspio_add_field', description: 'Add a new field/column to an existing table', inputSchema: { type: 'object', properties: { tableName: { type: 'string' }, field: { type: 'object' } }, required: ['tableName', 'field'] } },
-          { name: 'caspio_delete_field', description: 'Delete a field/column from a table (USE WITH CAUTION)', inputSchema: { type: 'object', properties: { tableName: { type: 'string' }, fieldName: { type: 'string' }, confirm: { type: 'boolean' } }, required: ['tableName', 'fieldName', 'confirm'] } },
-          { name: 'caspio_get_records', description: 'Get records from a table with optional filtering, sorting, and pagination', inputSchema: { type: 'object', properties: { tableName: { type: 'string' }, where: { type: 'string' }, orderBy: { type: 'string' }, limit: { type: 'number' }, pageNumber: { type: 'number' }, pageSize: { type: 'number' }, select: { type: 'string' }, groupBy: { type: 'string' } }, required: ['tableName'] } },
-          { name: 'caspio_create_record', description: 'Create a new record in a table', inputSchema: { type: 'object', properties: { tableName: { type: 'string' }, record: { type: 'object' } }, required: ['tableName', 'record'] } },
-          { name: 'caspio_create_records', description: 'Create multiple records in a table at once', inputSchema: { type: 'object', properties: { tableName: { type: 'string' }, records: { type: 'array' } }, required: ['tableName', 'records'] } },
-          { name: 'caspio_update_records', description: 'Update records matching a WHERE clause', inputSchema: { type: 'object', properties: { tableName: { type: 'string' }, updates: { type: 'object' }, where: { type: 'string' } }, required: ['tableName', 'updates', 'where'] } },
-          { name: 'caspio_delete_records', description: 'Delete records matching a WHERE clause (USE WITH CAUTION)', inputSchema: { type: 'object', properties: { tableName: { type: 'string' }, where: { type: 'string' }, confirm: { type: 'boolean' } }, required: ['tableName', 'where', 'confirm'] } },
-          { name: 'caspio_list_views', description: 'List all views in the Caspio account', inputSchema: { type: 'object', properties: {}, required: [] } },
-          { name: 'caspio_get_view_schema', description: 'Get the schema/definition of a specific view', inputSchema: { type: 'object', properties: { viewName: { type: 'string' } }, required: ['viewName'] } },
-          { name: 'caspio_get_view_records', description: 'Get records from a view with optional filtering and sorting', inputSchema: { type: 'object', properties: { viewName: { type: 'string' }, where: { type: 'string' }, orderBy: { type: 'string' }, limit: { type: 'number' }, pageNumber: { type: 'number' }, pageSize: { type: 'number' }, select: { type: 'string' } }, required: ['viewName'] } },
-          { name: 'caspio_list_applications', description: 'List all applications in the Caspio account', inputSchema: { type: 'object', properties: {}, required: [] } },
-          { name: 'caspio_get_application', description: 'Get details of a specific application', inputSchema: { type: 'object', properties: { appName: { type: 'string' } }, required: ['appName'] } },
-          { name: 'caspio_list_files', description: 'List files in a folder', inputSchema: { type: 'object', properties: { folderPath: { type: 'string' } }, required: [] } },
-          { name: 'caspio_get_file_metadata', description: 'Get metadata for a specific file', inputSchema: { type: 'object', properties: { filePath: { type: 'string' } }, required: ['filePath'] } },
-          { name: 'caspio_delete_file', description: 'Delete a file (USE WITH CAUTION)', inputSchema: { type: 'object', properties: { filePath: { type: 'string' }, confirm: { type: 'boolean' } }, required: ['filePath', 'confirm'] } },
-          { name: 'caspio_list_tasks', description: 'List all scheduled tasks', inputSchema: { type: 'object', properties: {}, required: [] } },
-          { name: 'caspio_get_task', description: 'Get details of a specific scheduled task', inputSchema: { type: 'object', properties: { taskName: { type: 'string' } }, required: ['taskName'] } },
-          { name: 'caspio_run_task', description: 'Manually run a scheduled task', inputSchema: { type: 'object', properties: { taskName: { type: 'string' } }, required: ['taskName'] } },
-          { name: 'caspio_test_connection', description: 'Test the connection to Caspio API', inputSchema: { type: 'object', properties: {}, required: [] } },
-          { name: 'caspio_get_account_summary', description: 'Get a summary of the Caspio account including tables, views, and applications', inputSchema: { type: 'object', properties: {}, required: [] } },
-        ],
+        tools: getToolDefinitions(),
       };
 
     default:
