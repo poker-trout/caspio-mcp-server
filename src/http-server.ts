@@ -1095,7 +1095,9 @@ async function executeTool(name: string, args: Record<string, any>, client: Casp
       result = { tables: await client.listTables() };
       break;
     case 'caspio_get_table_schema':
-      result = await client.getTableDefinition(args.tableName);
+      const tableDefinition = await client.getTableDefinition(args.tableName);
+      const tableFields = await client.getTableFields(args.tableName);
+      result = { ...tableDefinition, Fields: tableFields };
       break;
     case 'caspio_create_table':
       await client.createTable({

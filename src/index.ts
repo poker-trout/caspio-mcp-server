@@ -709,7 +709,9 @@ class CaspioMcpServer {
         return { tables: await this.client.listTables() };
 
       case 'caspio_get_table_schema':
-        return await this.client.getTableDefinition(args.tableName);
+        const tableDef = await this.client.getTableDefinition(args.tableName);
+        const tableFields = await this.client.getTableFields(args.tableName);
+        return { ...tableDef, Fields: tableFields };
 
       case 'caspio_create_table':
         await this.client.createTable({

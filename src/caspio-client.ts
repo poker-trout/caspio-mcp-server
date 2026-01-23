@@ -262,6 +262,17 @@ export class CaspioClient {
   }
 
   /**
+   * Get all field definitions for a table
+   */
+  async getTableFields(tableName: string): Promise<TableField[]> {
+    const result = await this.request<{ Result: TableField[] }>(
+      'GET',
+      `/tables/${encodeURIComponent(tableName)}/fields`
+    );
+    return result.Result || [];
+  }
+
+  /**
    * Get field definition for a specific field in a table
    */
   async getFieldDefinition(tableName: string, fieldName: string): Promise<TableField> {
