@@ -1199,7 +1199,6 @@ function getAuthorizationPageHtml(authId: string, clientId: string, redirectUri:
         <label for="caspio_base_url">Caspio Base URL</label>
         <input type="text" id="caspio_base_url" name="caspio_base_url"
                placeholder="https://c1abc123.caspio.com" required>
-        <p class="hint">Your Caspio account URL (from Token Endpoint)</p>
       </div>
 
       <div class="form-group">
