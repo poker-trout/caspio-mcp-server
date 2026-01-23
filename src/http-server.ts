@@ -475,9 +475,9 @@ async function handleMcpRequest(req: http.IncomingMessage, res: http.ServerRespo
 
   console.log(`[MCP] Method: ${rpcRequest.method}, ID: ${rpcRequest.id}`);
 
-  // Allow initialize and tools/list without authentication
+  // Allow certain methods without authentication for quick responses
   // This enables MCP clients to discover available tools before auth
-  const unauthenticatedMethods = ['initialize', 'tools/list', 'notifications/initialized'];
+  const unauthenticatedMethods = ['initialize', 'tools/list', 'notifications/initialized', 'resources/list', 'resources/read'];
 
   if (unauthenticatedMethods.includes(rpcRequest.method)) {
     try {
@@ -912,7 +912,8 @@ async function handleMcpMethodUnauthenticated(request: JsonRpcRequest): Promise<
         },
         capabilities: {
           tools: {},
-          resources: {},
+          // Resources disabled - use tools instead for better performance
+          // resources: {},
         },
       };
 
@@ -923,6 +924,14 @@ async function handleMcpMethodUnauthenticated(request: JsonRpcRequest): Promise<
       return {
         tools: getToolDefinitions(),
       };
+
+    case 'resources/list':
+      // Return empty list - resources are not used, use tools instead
+      return { resources: [] };
+
+    case 'resources/read':
+      // Resources not available - use tools instead
+      throw new Error('Resources not available. Use caspio_get_table_schema or caspio_get_view_schema tools instead.');
 
     default:
       throw new Error(`Method ${method} requires authentication`);
