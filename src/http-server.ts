@@ -9,6 +9,8 @@
 import http from 'http';
 import { URL, URLSearchParams } from 'url';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import { CaspioClient } from './caspio-client.js';
 
 // ==================== Types ====================
@@ -64,21 +66,119 @@ const RAILWAY_URL = process.env.RAILWAY_PUBLIC_DOMAIN
   : null;
 const BASE_URL = process.env.BASE_URL || RAILWAY_URL || `http://localhost:${PORT}`;
 
-// Log configuration on startup
-console.log(`[Config] PORT=${PORT}, BASE_URL=${BASE_URL}`);
+// Session persistence file path
+// Use RAILWAY_VOLUME_MOUNT_PATH if available (Railway persistent volume)
+// Otherwise fall back to local data directory
+const DATA_DIR = process.env.RAILWAY_VOLUME_MOUNT_PATH || process.env.DATA_DIR || './data';
+const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 
-// In-memory storage (use Redis/DB in production)
+// Log configuration on startup
+console.log(`[Config] PORT=${PORT}, BASE_URL=${BASE_URL}, DATA_DIR=${DATA_DIR}`);
+
+// In-memory storage (sessions are persisted to file)
 const sessions = new Map<string, OAuthSession>();
 const pendingAuths = new Map<string, PendingAuth>();
 const authCodes = new Map<string, { sessionId: string; expiresAt: number }>();
 
+// ==================== Session Persistence ====================
+
+/**
+ * Ensure data directory exists
+ */
+function ensureDataDir(): void {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+      console.log(`[Sessions] Created data directory: ${DATA_DIR}`);
+    }
+  } catch (err) {
+    console.error(`[Sessions] Failed to create data directory: ${err}`);
+  }
+}
+
+/**
+ * Load sessions from file on startup
+ */
+function loadSessions(): void {
+  try {
+    ensureDataDir();
+    if (fs.existsSync(SESSIONS_FILE)) {
+      const data = fs.readFileSync(SESSIONS_FILE, 'utf-8');
+      const parsed = JSON.parse(data) as Record<string, OAuthSession>;
+      const now = Date.now();
+      let loaded = 0;
+      let expired = 0;
+
+      for (const [key, session] of Object.entries(parsed)) {
+        // Only load non-expired sessions
+        if (session.expiresAt > now) {
+          sessions.set(key, session);
+          loaded++;
+        } else {
+          expired++;
+        }
+      }
+      console.log(`[Sessions] Loaded ${loaded} sessions from file (${expired} expired sessions skipped)`);
+    } else {
+      console.log('[Sessions] No existing sessions file found, starting fresh');
+    }
+  } catch (err) {
+    console.error(`[Sessions] Failed to load sessions: ${err}`);
+  }
+}
+
+/**
+ * Save sessions to file
+ */
+function saveSessions(): void {
+  try {
+    ensureDataDir();
+    const data: Record<string, OAuthSession> = {};
+    for (const [key, session] of sessions) {
+      data[key] = session;
+    }
+    fs.writeFileSync(SESSIONS_FILE, JSON.stringify(data, null, 2));
+    console.log(`[Sessions] Saved ${sessions.size} sessions to file`);
+  } catch (err) {
+    console.error(`[Sessions] Failed to save sessions: ${err}`);
+  }
+}
+
+/**
+ * Add or update a session (and persist to file)
+ */
+function setSession(sessionId: string, session: OAuthSession): void {
+  sessions.set(sessionId, session);
+  saveSessions();
+}
+
+/**
+ * Delete a session (and persist to file)
+ */
+function deleteSession(sessionId: string): boolean {
+  const result = sessions.delete(sessionId);
+  if (result) {
+    saveSessions();
+  }
+  return result;
+}
+
+// Load sessions on startup
+loadSessions();
+
 // Cleanup old sessions periodically
 setInterval(() => {
   const now = Date.now();
+  let sessionsDeleted = 0;
   for (const [key, session] of sessions) {
     if (session.expiresAt < now) {
       sessions.delete(key);
+      sessionsDeleted++;
     }
+  }
+  // Save if any sessions were deleted
+  if (sessionsDeleted > 0) {
+    saveSessions();
   }
   for (const [key, pending] of pendingAuths) {
     if (pending.createdAt + 600000 < now) { // 10 min expiry
@@ -296,8 +396,8 @@ async function handleAuthorizeSubmit(req: http.IncomingMessage, res: http.Server
   const code = generateId();
   const sessionId = generateId();
 
-  // Create session
-  sessions.set(sessionId, {
+  // Create session (persisted to file)
+  setSession(sessionId, {
     caspioBaseUrl,
     caspioClientId,
     caspioClientSecret,
@@ -366,6 +466,9 @@ async function handleToken(req: http.IncomingMessage, res: http.ServerResponse):
     session.refreshToken = refreshToken;
     session.expiresAt = Date.now() + 86400000; // 24 hours
 
+    // Persist updated session to file
+    setSession(codeData.sessionId, session);
+
     // Clean up code
     authCodes.delete(code);
 
@@ -408,6 +511,9 @@ async function handleToken(req: http.IncomingMessage, res: http.ServerResponse):
     foundSession.accessToken = newAccessToken;
     foundSession.refreshToken = newRefreshToken;
     foundSession.expiresAt = Date.now() + 86400000;
+
+    // Persist updated session to file
+    setSession(foundSessionId, foundSession);
 
     sendJson(res, 200, {
       access_token: newAccessToken,
