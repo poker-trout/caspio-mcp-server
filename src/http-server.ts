@@ -441,17 +441,39 @@ function getSessionFromRequest(req: http.IncomingMessage): OAuthSession | null {
 
 async function handleMcpRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   const body = await readBody(req);
-  let rpcRequest: JsonRpcRequest;
-  try {
-    rpcRequest = JSON.parse(body);
-  } catch {
-    sendJson(res, 400, {
+
+  // Log incoming requests for debugging
+  console.log(`[MCP] ${req.method} /mcp - Body length: ${body.length}`);
+
+  // Handle empty body (some clients send empty POST to check endpoint)
+  if (!body || body.trim() === '') {
+    console.log('[MCP] Empty body received, returning server info');
+    sendJson(res, 200, {
       jsonrpc: '2.0',
       id: null,
-      error: { code: -32700, message: 'Parse error' },
+      result: {
+        name: 'caspio-mcp-server',
+        version: '1.0.0',
+        protocolVersion: '2024-11-05',
+      },
     });
     return;
   }
+
+  let rpcRequest: JsonRpcRequest;
+  try {
+    rpcRequest = JSON.parse(body);
+  } catch (parseError) {
+    console.error('[MCP] JSON parse error:', parseError, 'Body:', body.substring(0, 200));
+    sendJson(res, 400, {
+      jsonrpc: '2.0',
+      id: null,
+      error: { code: -32700, message: 'Parse error: Invalid JSON' },
+    });
+    return;
+  }
+
+  console.log(`[MCP] Method: ${rpcRequest.method}, ID: ${rpcRequest.id}`);
 
   // Allow initialize and tools/list without authentication
   // This enables MCP clients to discover available tools before auth
@@ -1257,9 +1279,24 @@ const server = http.createServer(async (req, res) => {
     }
 
     // MCP Endpoint (Streamable HTTP)
-    if (url.pathname === '/mcp' && method === 'POST') {
-      await handleMcpRequest(req, res);
-      return;
+    if (url.pathname === '/mcp') {
+      if (method === 'POST') {
+        await handleMcpRequest(req, res);
+        return;
+      }
+      if (method === 'GET') {
+        // Return server capabilities for GET requests (some clients probe this way)
+        sendJson(res, 200, {
+          name: 'caspio-mcp-server',
+          version: '1.0.0',
+          protocolVersion: '2024-11-05',
+          capabilities: {
+            tools: {},
+            resources: {},
+          },
+        });
+        return;
+      }
     }
 
     // Health check
