@@ -1647,7 +1647,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`
-🗄️  Caspio MCP Server (Remote)
+🗄️  Caspio MCP Server (Remote) v1.1.0 - with Directories API
 
    Server running at: ${BASE_URL}
    MCP Endpoint:      ${BASE_URL}/mcp
