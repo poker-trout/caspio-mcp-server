@@ -587,6 +587,202 @@ export class CaspioClient {
     await this.request('POST', `/tasks/${encodeURIComponent(taskName)}/run`);
   }
 
+  // ==================== Directories API (v3) ====================
+
+  /**
+   * Get the API base URL for v3
+   */
+  private get apiBaseV3(): string {
+    return `${this.config.baseUrl}/integrations/rest/v3`;
+  }
+
+  /**
+   * Make an authenticated API request to v3 endpoints
+   */
+  private async requestV3<T>(
+    method: string,
+    endpoint: string,
+    body?: any,
+    queryParams?: Record<string, string>
+  ): Promise<T> {
+    await this.ensureAuthenticated();
+
+    let url = `${this.apiBaseV3}${endpoint}`;
+
+    if (queryParams && Object.keys(queryParams).length > 0) {
+      const params = new URLSearchParams(queryParams);
+      url += `?${params.toString()}`;
+    }
+
+    const headers: Record<string, string> = {
+      'Authorization': `Bearer ${this.accessToken}`,
+      'Content-Type': 'application/json',
+    };
+
+    const options: RequestInit = {
+      method,
+      headers,
+    };
+
+    if (body && (method === 'POST' || method === 'PUT')) {
+      options.body = JSON.stringify(body);
+    }
+
+    const response = await fetch(url, options);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`API request failed: ${response.status} - ${errorText}`);
+    }
+
+    // Handle empty responses
+    const text = await response.text();
+    if (!text) {
+      return {} as T;
+    }
+
+    return JSON.parse(text);
+  }
+
+  /**
+   * List all directories
+   */
+  async listDirectories(): Promise<any[]> {
+    const result = await this.requestV3<{ Result: any[] }>('GET', '/directories');
+    return result.Result || [];
+  }
+
+  /**
+   * Get directory details
+   */
+  async getDirectory(directoryName: string): Promise<any> {
+    const result = await this.requestV3<{ Result: any }>(
+      'GET',
+      `/directories/${encodeURIComponent(directoryName)}`
+    );
+    return result.Result;
+  }
+
+  /**
+   * List users in a directory
+   */
+  async listDirectoryUsers(directoryName: string, options: QueryOptions = {}): Promise<any[]> {
+    const queryParams: Record<string, string> = {};
+
+    if (options.select) {
+      queryParams['q.select'] = options.select;
+    }
+    if (options.where) {
+      queryParams['q.where'] = options.where;
+    }
+    if (options.orderBy) {
+      queryParams['q.orderBy'] = options.orderBy;
+    }
+    if (options.limit) {
+      queryParams['q.limit'] = options.limit.toString();
+    }
+    if (options.pageNumber) {
+      queryParams['q.pageNumber'] = options.pageNumber.toString();
+    }
+    if (options.pageSize) {
+      queryParams['q.pageSize'] = options.pageSize.toString();
+    }
+
+    const result = await this.requestV3<{ Result: any[] }>(
+      'GET',
+      `/directories/${encodeURIComponent(directoryName)}/users`,
+      undefined,
+      queryParams
+    );
+    return result.Result || [];
+  }
+
+  /**
+   * Get a specific user from a directory
+   */
+  async getDirectoryUser(directoryName: string, externalKey: string): Promise<any> {
+    const result = await this.requestV3<{ Result: any }>(
+      'GET',
+      `/directories/${encodeURIComponent(directoryName)}/users/${encodeURIComponent(externalKey)}`
+    );
+    return result.Result;
+  }
+
+  /**
+   * Create a user in a directory
+   */
+  async createDirectoryUser(directoryName: string, user: Record<string, any>): Promise<any> {
+    const result = await this.requestV3<{ Result: any }>(
+      'POST',
+      `/directories/${encodeURIComponent(directoryName)}/users`,
+      user
+    );
+    return result.Result;
+  }
+
+  /**
+   * Update a user in a directory
+   */
+  async updateDirectoryUser(
+    directoryName: string,
+    externalKey: string,
+    updates: Record<string, any>
+  ): Promise<any> {
+    const result = await this.requestV3<{ Result: any }>(
+      'PUT',
+      `/directories/${encodeURIComponent(directoryName)}/users/${encodeURIComponent(externalKey)}`,
+      updates
+    );
+    return result.Result;
+  }
+
+  /**
+   * Delete a user from a directory
+   */
+  async deleteDirectoryUser(directoryName: string, externalKey: string): Promise<void> {
+    await this.requestV3(
+      'DELETE',
+      `/directories/${encodeURIComponent(directoryName)}/users/${encodeURIComponent(externalKey)}`
+    );
+  }
+
+  /**
+   * Activate a user in a directory
+   */
+  async activateDirectoryUser(directoryName: string, externalKey: string): Promise<void> {
+    await this.requestV3(
+      'POST',
+      `/directories/${encodeURIComponent(directoryName)}/users/${encodeURIComponent(externalKey)}/activate`
+    );
+  }
+
+  /**
+   * Deactivate a user in a directory
+   */
+  async deactivateDirectoryUser(directoryName: string, externalKey: string): Promise<void> {
+    await this.requestV3(
+      'POST',
+      `/directories/${encodeURIComponent(directoryName)}/users/${encodeURIComponent(externalKey)}/deactivate`
+    );
+  }
+
+  /**
+   * Authenticate a user against a directory
+   * Returns user data if authentication is successful, throws error otherwise
+   */
+  async authenticateDirectoryUser(
+    directoryName: string,
+    username: string,
+    password: string
+  ): Promise<any> {
+    const result = await this.requestV3<{ Result: any }>(
+      'POST',
+      `/directories/${encodeURIComponent(directoryName)}/users/authenticate`,
+      { username, password }
+    );
+    return result.Result;
+  }
+
   // ==================== Utility Methods ====================
 
   /**

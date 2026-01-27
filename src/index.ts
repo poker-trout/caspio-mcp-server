@@ -540,6 +540,209 @@ const TOOLS = [
     },
   },
 
+  // Directories Tools (v3 API)
+  {
+    name: 'caspio_list_directories',
+    description: 'List all directories in the Caspio account',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'caspio_get_directory',
+    description: 'Get details of a specific directory',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        directoryName: {
+          type: 'string',
+          description: 'Name of the directory',
+        },
+      },
+      required: ['directoryName'],
+    },
+  },
+  {
+    name: 'caspio_list_directory_users',
+    description: 'List users in a directory with optional filtering',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        directoryName: {
+          type: 'string',
+          description: 'Name of the directory',
+        },
+        select: {
+          type: 'string',
+          description: 'Comma-separated list of fields to select',
+        },
+        where: {
+          type: 'string',
+          description: 'WHERE clause for filtering',
+        },
+        orderBy: {
+          type: 'string',
+          description: 'ORDER BY clause',
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum number of users to return',
+        },
+        pageNumber: {
+          type: 'number',
+          description: 'Page number for pagination',
+        },
+        pageSize: {
+          type: 'number',
+          description: 'Page size for pagination',
+        },
+      },
+      required: ['directoryName'],
+    },
+  },
+  {
+    name: 'caspio_get_directory_user',
+    description: 'Get a specific user from a directory by their external key',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        directoryName: {
+          type: 'string',
+          description: 'Name of the directory',
+        },
+        externalKey: {
+          type: 'string',
+          description: 'External key (unique identifier) of the user',
+        },
+      },
+      required: ['directoryName', 'externalKey'],
+    },
+  },
+  {
+    name: 'caspio_create_directory_user',
+    description: 'Create a new user in a directory',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        directoryName: {
+          type: 'string',
+          description: 'Name of the directory',
+        },
+        user: {
+          type: 'object',
+          description: 'User data including username, password, email, etc.',
+          additionalProperties: true,
+        },
+      },
+      required: ['directoryName', 'user'],
+    },
+  },
+  {
+    name: 'caspio_update_directory_user',
+    description: 'Update a user in a directory',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        directoryName: {
+          type: 'string',
+          description: 'Name of the directory',
+        },
+        externalKey: {
+          type: 'string',
+          description: 'External key (unique identifier) of the user',
+        },
+        updates: {
+          type: 'object',
+          description: 'Fields to update',
+          additionalProperties: true,
+        },
+      },
+      required: ['directoryName', 'externalKey', 'updates'],
+    },
+  },
+  {
+    name: 'caspio_delete_directory_user',
+    description: 'Delete a user from a directory (USE WITH CAUTION)',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        directoryName: {
+          type: 'string',
+          description: 'Name of the directory',
+        },
+        externalKey: {
+          type: 'string',
+          description: 'External key (unique identifier) of the user',
+        },
+        confirm: {
+          type: 'boolean',
+          description: 'Must be true to confirm deletion',
+        },
+      },
+      required: ['directoryName', 'externalKey', 'confirm'],
+    },
+  },
+  {
+    name: 'caspio_activate_directory_user',
+    description: 'Activate a user in a directory',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        directoryName: {
+          type: 'string',
+          description: 'Name of the directory',
+        },
+        externalKey: {
+          type: 'string',
+          description: 'External key (unique identifier) of the user',
+        },
+      },
+      required: ['directoryName', 'externalKey'],
+    },
+  },
+  {
+    name: 'caspio_deactivate_directory_user',
+    description: 'Deactivate a user in a directory',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        directoryName: {
+          type: 'string',
+          description: 'Name of the directory',
+        },
+        externalKey: {
+          type: 'string',
+          description: 'External key (unique identifier) of the user',
+        },
+      },
+      required: ['directoryName', 'externalKey'],
+    },
+  },
+  {
+    name: 'caspio_authenticate_directory_user',
+    description: 'Authenticate a user against a directory. Returns user data if successful.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        directoryName: {
+          type: 'string',
+          description: 'Name of the directory',
+        },
+        username: {
+          type: 'string',
+          description: 'Username to authenticate',
+        },
+        password: {
+          type: 'string',
+          description: 'Password to verify',
+        },
+      },
+      required: ['directoryName', 'username', 'password'],
+    },
+  },
+
   // Utility Tools
   {
     name: 'caspio_test_connection',
@@ -827,6 +1030,67 @@ class CaspioMcpServer {
       case 'caspio_run_task':
         await this.client.runTask(args.taskName);
         return { success: true, message: `Task '${args.taskName}' started successfully` };
+
+      // Directories (v3 API)
+      case 'caspio_list_directories':
+        return { directories: await this.client.listDirectories() };
+
+      case 'caspio_get_directory':
+        return await this.client.getDirectory(args.directoryName);
+
+      case 'caspio_list_directory_users': {
+        const options: QueryOptions = {
+          select: args.select,
+          where: args.where,
+          orderBy: args.orderBy,
+          limit: args.limit,
+          pageNumber: args.pageNumber,
+          pageSize: args.pageSize,
+        };
+        const users = await this.client.listDirectoryUsers(args.directoryName, options);
+        return { users, count: users.length };
+      }
+
+      case 'caspio_get_directory_user':
+        return await this.client.getDirectoryUser(args.directoryName, args.externalKey);
+
+      case 'caspio_create_directory_user': {
+        const created = await this.client.createDirectoryUser(args.directoryName, args.user);
+        return { success: true, user: created };
+      }
+
+      case 'caspio_update_directory_user': {
+        const updated = await this.client.updateDirectoryUser(
+          args.directoryName,
+          args.externalKey,
+          args.updates
+        );
+        return { success: true, user: updated };
+      }
+
+      case 'caspio_delete_directory_user':
+        if (!args.confirm) {
+          throw new Error('Deletion not confirmed. Set confirm=true to proceed.');
+        }
+        await this.client.deleteDirectoryUser(args.directoryName, args.externalKey);
+        return { success: true, message: `User deleted from directory '${args.directoryName}'` };
+
+      case 'caspio_activate_directory_user':
+        await this.client.activateDirectoryUser(args.directoryName, args.externalKey);
+        return { success: true, message: `User activated in directory '${args.directoryName}'` };
+
+      case 'caspio_deactivate_directory_user':
+        await this.client.deactivateDirectoryUser(args.directoryName, args.externalKey);
+        return { success: true, message: `User deactivated in directory '${args.directoryName}'` };
+
+      case 'caspio_authenticate_directory_user': {
+        const authResult = await this.client.authenticateDirectoryUser(
+          args.directoryName,
+          args.username,
+          args.password
+        );
+        return { success: true, authenticated: true, user: authResult };
+      }
 
       // Utility
       case 'caspio_test_connection': {
